@@ -22,6 +22,10 @@ class TileSpec:
 
 
 def build_level_tiles(level: LevelSpec, tile_size: int, stride: int) -> List[TileSpec]:
+    if tile_size <= 0:
+        raise ValueError("tile_size must be greater than 0")
+    if stride <= 0:
+        raise ValueError("stride must be greater than 0")
     if stride > tile_size:
         raise ValueError("stride must be less than or equal to tile_size")
 

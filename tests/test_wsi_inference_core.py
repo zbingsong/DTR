@@ -32,6 +32,30 @@ def test_build_level_tiles_rejects_stride_larger_than_tile() -> None:
         raise AssertionError("Expected ValueError")
 
 
+def test_build_level_tiles_rejects_nonpositive_tile_size() -> None:
+    level = LevelSpec(level=0, width=512, height=512, downsample=1.0)
+
+    for tile_size in (0, -1):
+        try:
+            build_level_tiles(level=level, tile_size=tile_size, stride=1)
+        except ValueError as exc:
+            assert "tile_size" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+
+def test_build_level_tiles_rejects_nonpositive_stride() -> None:
+    level = LevelSpec(level=0, width=512, height=512, downsample=1.0)
+
+    for stride in (0, -1):
+        try:
+            build_level_tiles(level=level, tile_size=256, stride=stride)
+        except ValueError as exc:
+            assert "stride" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError")
+
+
 def test_is_background_tile_uses_white_fraction_rule() -> None:
     tile = np.full((4, 4, 3), 255, dtype=np.uint8)
     tile[0, 0] = [10, 10, 10]
