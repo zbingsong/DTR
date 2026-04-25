@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Sequence
 
 import numpy as np
+import tifffile
 
 
 @dataclass(frozen=True)
@@ -81,3 +82,45 @@ def stitch_tile_prediction(
 
 def allocate_level_canvas(out_channels: int, level: LevelSpec) -> np.ndarray:
     return np.zeros((out_channels, level.height, level.width), dtype=np.float32)
+
+
+def _scale_to_uint16(
+    array: np.ndarray,
+    min_value: float,
+    max_value: float,
+) -> np.ndarray:
+    if max_value <= min_value:
+        return np.zeros_like(array, dtype=np.uint16)
+
+    scaled = (array - min_value) / (max_value - min_value)
+    scaled = np.clip(scaled, 0.0, 1.0)
+    return np.round(scaled * 65535.0).astype(np.uint16)
+
+
+def quantize_global(level_arrays: Sequence[np.ndarray]) -> List[np.ndarray]:
+    non_empty = [array for array in level_arrays if array.size > 0]
+    if not non_empty:
+        raise ValueError("global quantization requires at least one array")
+
+    global_min = min(float(array.min()) for array in non_empty)
+    global_max = max(float(array.max()) for array in non_empty)
+    return [_scale_to_uint16(array, global_min, global_max) for array in level_arrays]
+
+
+def quantize_tile_prediction(tile_prediction: np.ndarray) -> np.ndarray:
+    return _scale_to_uint16(
+        tile_prediction,
+        float(tile_prediction.min()),
+        float(tile_prediction.max()),
+    )
+
+
+def write_ome_tiff(output_path: str, series_arrays: Sequence[np.ndarray]) -> None:
+    with tifffile.TiffWriter(output_path, ome=True) as tif:
+        for series in series_arrays:
+            tif.write(
+                series,
+                metadata={"axes": "CYX"},
+                photometric="MINISBLACK",
+                planarconfig="SEPARATE",
+            )

@@ -88,3 +88,51 @@ def test_stitch_tile_prediction_crops_back_to_valid_region() -> None:
 
     assert np.all(canvas[:, 4:6, 4:6] == 1.0)
     assert float(canvas[:, :4, :4].sum()) == 0.0
+
+
+def test_quantize_global_scales_all_series_to_uint16() -> None:
+    from wsi_inference import quantize_global
+
+    arrays = [
+        np.array([[[0.0, 1.0]]], dtype=np.float32),
+        np.array([[[2.0, 3.0]]], dtype=np.float32),
+    ]
+
+    scaled = quantize_global(arrays)
+
+    assert scaled[0].dtype == np.uint16
+    assert scaled[1].dtype == np.uint16
+    assert scaled[0][0, 0, 0] == 0
+    assert scaled[1][0, 0, 1] == 65535
+
+
+def test_quantize_tile_scales_each_tile_before_stitching() -> None:
+    from wsi_inference import quantize_tile_prediction
+
+    tile = np.array([[[1.0, 3.0], [5.0, 7.0]]], dtype=np.float32)
+
+    scaled = quantize_tile_prediction(tile)
+
+    assert scaled.dtype == np.uint16
+    assert scaled.min() == 0
+    assert scaled.max() == 65535
+
+
+def test_write_ome_tiff_writes_one_series_per_level(tmp_path: Path) -> None:
+    import tifffile
+
+    from wsi_inference import write_ome_tiff
+
+    path = tmp_path / "predictions.ome.tiff"
+    write_ome_tiff(
+        str(path),
+        [
+            np.zeros((3, 4, 5), dtype=np.uint16),
+            np.ones((3, 2, 3), dtype=np.uint16),
+        ],
+    )
+
+    with tifffile.TiffFile(path) as tif:
+        assert len(tif.series) == 2
+        assert tif.series[0].shape == (3, 4, 5)
+        assert tif.series[1].shape == (3, 2, 3)
