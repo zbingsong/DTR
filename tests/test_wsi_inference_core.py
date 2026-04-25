@@ -62,3 +62,29 @@ def test_is_background_tile_uses_white_fraction_rule() -> None:
 
     assert is_background_tile(tile, rgb_threshold=200, background_fraction=0.95) is False
     assert is_background_tile(tile, rgb_threshold=200, background_fraction=0.93) is True
+
+
+def test_pad_tile_to_size_uses_white_pixels() -> None:
+    from wsi_inference import pad_tile_to_size
+
+    tile = np.zeros((2, 3, 3), dtype=np.uint8)
+
+    padded = pad_tile_to_size(tile, tile_size=5)
+
+    assert padded.shape == (5, 5, 3)
+    assert np.all(padded[:2, :3] == 0)
+    assert np.all(padded[2:, :, :] == 255)
+    assert np.all(padded[:, 3:, :] == 255)
+
+
+def test_stitch_tile_prediction_crops_back_to_valid_region() -> None:
+    from wsi_inference import stitch_tile_prediction
+
+    canvas = np.zeros((3, 6, 6), dtype=np.float32)
+    prediction = np.ones((3, 4, 4), dtype=np.float32)
+    tile = TileSpec(level=0, x=4, y=4, read_width=2, read_height=2)
+
+    stitch_tile_prediction(canvas, tile, prediction)
+
+    assert np.all(canvas[:, 4:6, 4:6] == 1.0)
+    assert float(canvas[:, :4, :4].sum()) == 0.0

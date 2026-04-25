@@ -57,3 +57,27 @@ def is_background_tile(
 ) -> bool:
     white_mask = np.all(tile_rgb > rgb_threshold, axis=-1)
     return float(white_mask.mean()) >= background_fraction
+
+
+def pad_tile_to_size(tile_rgb: np.ndarray, tile_size: int) -> np.ndarray:
+    height, width = tile_rgb.shape[:2]
+    padded = np.full((tile_size, tile_size, 3), 255, dtype=tile_rgb.dtype)
+    padded[:height, :width, :] = tile_rgb
+    return padded
+
+
+def stitch_tile_prediction(
+    canvas: np.ndarray,
+    tile: TileSpec,
+    prediction: np.ndarray,
+) -> None:
+    valid_prediction = prediction[:, : tile.read_height, : tile.read_width]
+    canvas[
+        :,
+        tile.y : tile.y + tile.read_height,
+        tile.x : tile.x + tile.read_width,
+    ] = valid_prediction
+
+
+def allocate_level_canvas(out_channels: int, level: LevelSpec) -> np.ndarray:
+    return np.zeros((out_channels, level.height, level.width), dtype=np.float32)
