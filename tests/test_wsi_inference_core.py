@@ -1,4 +1,9 @@
+from pathlib import Path
+import sys
+
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from wsi_inference import LevelSpec, TileSpec, build_level_tiles, is_background_tile
 
