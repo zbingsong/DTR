@@ -204,6 +204,91 @@ def test_run_tile_batch_restores_training_state() -> None:
     assert model.training is True
 
 
+def test_run_level_inference_processes_each_level_independently() -> None:
+    import torch
+
+    from wsi_inference import run_level_inference
+
+    class FakeSlide:
+        def read_region(
+            self,
+            location: tuple[int, int],
+            level: int,
+            size: tuple[int, int],
+        ) -> np.ndarray:
+            del location
+            width, height = size
+            value = 20 if level == 0 else 40
+            rgba = np.full((height, width, 4), 255, dtype=np.uint8)
+            rgba[:, :, :3] = value
+            return rgba
+
+    class FakeModel(torch.nn.Module):
+        def forward(self, batch: torch.Tensor) -> torch.Tensor:
+            return torch.ones(
+                (batch.shape[0], 3, batch.shape[2], batch.shape[3]),
+                dtype=batch.dtype,
+            )
+
+    level0 = LevelSpec(level=0, width=4, height=4, downsample=1.0)
+    level1 = LevelSpec(level=1, width=2, height=2, downsample=4.0)
+
+    out0 = run_level_inference(
+        FakeSlide(),
+        FakeModel(),
+        level0,
+        tile_size=4,
+        stride=4,
+        device="cpu",
+    )
+    out1 = run_level_inference(
+        FakeSlide(),
+        FakeModel(),
+        level1,
+        tile_size=4,
+        stride=4,
+        device="cpu",
+    )
+
+    assert out0.shape == (3, 4, 4)
+    assert out1.shape == (3, 2, 2)
+
+
+def test_run_level_inference_leaves_background_tiles_as_zero() -> None:
+    import torch
+
+    from wsi_inference import run_level_inference
+
+    class FakeSlide:
+        def read_region(
+            self,
+            location: tuple[int, int],
+            level: int,
+            size: tuple[int, int],
+        ) -> np.ndarray:
+            del location, level
+            width, height = size
+            return np.full((height, width, 4), 255, dtype=np.uint8)
+
+    class FakeModel(torch.nn.Module):
+        def forward(self, batch: torch.Tensor) -> torch.Tensor:
+            del batch
+            raise AssertionError("background tiles should not be inferred")
+
+    level = LevelSpec(level=0, width=4, height=4, downsample=1.0)
+
+    output = run_level_inference(
+        FakeSlide(),
+        FakeModel(),
+        level,
+        tile_size=4,
+        stride=4,
+        device="cpu",
+    )
+
+    assert float(output.sum()) == 0.0
+
+
 def test_load_generator_uses_repo_defaults_and_eval_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

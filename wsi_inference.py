@@ -1,10 +1,13 @@
 from dataclasses import dataclass
-from typing import List, Sequence
+from typing import TYPE_CHECKING, Any, List, Sequence
 
 import Attention_GAN
 import numpy as np
 import tifffile
 import torch
+
+if TYPE_CHECKING:
+    from openslide import OpenSlide
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,38 @@ def allocate_level_canvas(out_channels: int, level: LevelSpec) -> np.ndarray:
     return np.zeros((out_channels, level.height, level.width), dtype=np.float32)
 
 
+def open_slide(slide_path: str) -> "OpenSlide":
+    if not slide_path.lower().endswith(".svs"):
+        raise ValueError("slide path must point to a .svs file")
+
+    from openslide import OpenSlide
+
+    return OpenSlide(slide_path)
+
+
+def get_level_specs(slide: Any) -> List[LevelSpec]:
+    specs: List[LevelSpec] = []
+    for level_index in range(slide.level_count):
+        width, height = slide.level_dimensions[level_index]
+        specs.append(
+            LevelSpec(
+                level=level_index,
+                width=width,
+                height=height,
+                downsample=float(slide.level_downsamples[level_index]),
+            )
+        )
+    return specs
+
+
+def read_level_tile(slide: Any, tile: TileSpec, tile_size: int) -> np.ndarray:
+    rgba = np.asarray(
+        slide.read_region((tile.x, tile.y), tile.level, (tile.read_width, tile.read_height))
+    )
+    rgb = rgba[:, :, :3].astype(np.uint8)
+    return pad_tile_to_size(rgb, tile_size=tile_size)
+
+
 def _scale_to_uint16(
     array: np.ndarray,
     min_value: float,
@@ -148,6 +183,42 @@ def run_tile_batch(
     finally:
         model.train(was_training)
     return [outputs[index] for index in range(outputs.shape[0])]
+
+
+def run_level_inference(
+    slide: Any,
+    model: torch.nn.Module,
+    level: LevelSpec,
+    tile_size: int,
+    stride: int,
+    device: str,
+    out_channels: int = 3,
+    rgb_threshold: int = 200,
+    background_fraction: float = 0.995,
+) -> np.ndarray:
+    canvas = allocate_level_canvas(out_channels=out_channels, level=level)
+    tiles = build_level_tiles(level=level, tile_size=tile_size, stride=stride)
+
+    batch_specs: List[TileSpec] = []
+    batch_tiles: List[np.ndarray] = []
+    for tile in tiles:
+        padded_tile = read_level_tile(slide, tile, tile_size=tile_size)
+        valid_tile = padded_tile[: tile.read_height, : tile.read_width, :]
+        if is_background_tile(
+            valid_tile,
+            rgb_threshold=rgb_threshold,
+            background_fraction=background_fraction,
+        ):
+            continue
+        batch_specs.append(tile)
+        batch_tiles.append(padded_tile)
+
+    if batch_tiles:
+        outputs = run_tile_batch(model, batch_tiles, device=device)
+        for tile, prediction in zip(batch_specs, outputs):
+            stitch_tile_prediction(canvas, tile, prediction)
+
+    return canvas
 
 
 def load_generator(
