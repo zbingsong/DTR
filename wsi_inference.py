@@ -9,6 +9,8 @@ import torch
 if TYPE_CHECKING:
     from openslide import OpenSlide
 
+LEVEL_INFERENCE_BATCH_SIZE = 8
+
 
 @dataclass(frozen=True)
 class LevelSpec:
@@ -201,6 +203,17 @@ def run_level_inference(
 
     batch_specs: List[TileSpec] = []
     batch_tiles: List[np.ndarray] = []
+
+    def flush_batch() -> None:
+        if not batch_tiles:
+            return
+
+        outputs = run_tile_batch(model, batch_tiles, device=device)
+        for batch_tile, prediction in zip(batch_specs, outputs):
+            stitch_tile_prediction(canvas, batch_tile, prediction)
+        batch_specs.clear()
+        batch_tiles.clear()
+
     for tile in tiles:
         padded_tile = read_level_tile(slide, tile, tile_size=tile_size)
         valid_tile = padded_tile[: tile.read_height, : tile.read_width, :]
@@ -212,11 +225,10 @@ def run_level_inference(
             continue
         batch_specs.append(tile)
         batch_tiles.append(padded_tile)
+        if len(batch_tiles) >= LEVEL_INFERENCE_BATCH_SIZE:
+            flush_batch()
 
-    if batch_tiles:
-        outputs = run_tile_batch(model, batch_tiles, device=device)
-        for tile, prediction in zip(batch_specs, outputs):
-            stitch_tile_prediction(canvas, tile, prediction)
+    flush_batch()
 
     return canvas
 

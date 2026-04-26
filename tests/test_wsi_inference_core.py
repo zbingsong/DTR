@@ -210,6 +210,9 @@ def test_run_level_inference_processes_each_level_independently() -> None:
     from wsi_inference import run_level_inference
 
     class FakeSlide:
+        def __init__(self) -> None:
+            self.level_calls = []
+
         def read_region(
             self,
             location: tuple[int, int],
@@ -217,6 +220,7 @@ def test_run_level_inference_processes_each_level_independently() -> None:
             size: tuple[int, int],
         ) -> np.ndarray:
             del location
+            self.level_calls.append(level)
             width, height = size
             value = 20 if level == 0 else 40
             rgba = np.full((height, width, 4), 255, dtype=np.uint8)
@@ -232,9 +236,10 @@ def test_run_level_inference_processes_each_level_independently() -> None:
 
     level0 = LevelSpec(level=0, width=4, height=4, downsample=1.0)
     level1 = LevelSpec(level=1, width=2, height=2, downsample=4.0)
+    slide = FakeSlide()
 
     out0 = run_level_inference(
-        FakeSlide(),
+        slide,
         FakeModel(),
         level0,
         tile_size=4,
@@ -242,7 +247,7 @@ def test_run_level_inference_processes_each_level_independently() -> None:
         device="cpu",
     )
     out1 = run_level_inference(
-        FakeSlide(),
+        slide,
         FakeModel(),
         level1,
         tile_size=4,
@@ -252,6 +257,53 @@ def test_run_level_inference_processes_each_level_independently() -> None:
 
     assert out0.shape == (3, 4, 4)
     assert out1.shape == (3, 2, 2)
+    assert slide.level_calls == [0, 1]
+
+
+def test_run_level_inference_uses_bounded_mini_batches() -> None:
+    import torch
+
+    from wsi_inference import run_level_inference
+
+    class FakeSlide:
+        def read_region(
+            self,
+            location: tuple[int, int],
+            level: int,
+            size: tuple[int, int],
+        ) -> np.ndarray:
+            del location, level
+            width, height = size
+            rgba = np.full((height, width, 4), 255, dtype=np.uint8)
+            rgba[:, :, :3] = 20
+            return rgba
+
+    class TrackingModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.batch_sizes = []
+
+        def forward(self, batch: torch.Tensor) -> torch.Tensor:
+            self.batch_sizes.append(int(batch.shape[0]))
+            return torch.ones(
+                (batch.shape[0], 3, batch.shape[2], batch.shape[3]),
+                dtype=batch.dtype,
+            )
+
+    model = TrackingModel()
+    level = LevelSpec(level=0, width=16, height=16, downsample=1.0)
+
+    output = run_level_inference(
+        FakeSlide(),
+        model,
+        level,
+        tile_size=4,
+        stride=4,
+        device="cpu",
+    )
+
+    assert output.shape == (3, 16, 16)
+    assert model.batch_sizes == [8, 8]
 
 
 def test_run_level_inference_leaves_background_tiles_as_zero() -> None:
