@@ -1,7 +1,9 @@
 from pathlib import Path
 import sys
+from typing import Any, Dict
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -173,3 +175,91 @@ def test_run_tile_batch_returns_same_spatial_shape() -> None:
 
     assert len(outputs) == 2
     assert outputs[0].shape == (3, 4, 4)
+
+
+def test_run_tile_batch_restores_training_state() -> None:
+    import torch
+
+    from wsi_inference import run_tile_batch
+
+    class TrackingModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.forward_training_states = []
+
+        def forward(self, batch: torch.Tensor) -> torch.Tensor:
+            self.forward_training_states.append(self.training)
+            return torch.zeros(
+                (batch.shape[0], 3, batch.shape[2], batch.shape[3]),
+                dtype=batch.dtype,
+            )
+
+    model = TrackingModel()
+    model.train()
+
+    outputs = run_tile_batch(model, [np.zeros((4, 4, 3), dtype=np.uint8)], device="cpu")
+
+    assert len(outputs) == 1
+    assert model.forward_training_states == [False]
+    assert model.training is True
+
+
+def test_load_generator_uses_repo_defaults_and_eval_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import torch
+
+    from wsi_inference import load_generator
+
+    generator_calls = []
+    torch_load_calls = []
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.loaded = []
+            self.eval_called = False
+            self.training = True
+            self.device = None
+
+        def to(self, device: str) -> "FakeModel":
+            self.device = device
+            return self
+
+        def load_state_dict(self, state_dict: dict, strict: bool = False) -> None:
+            self.loaded.append((state_dict, strict))
+
+        def eval(self) -> "FakeModel":
+            self.eval_called = True
+            self.training = False
+            return self
+
+    fake_model = FakeModel()
+
+    def fake_generator(**kwargs: Any) -> FakeModel:
+        generator_calls.append(kwargs)
+        return fake_model
+
+    def fake_torch_load(path: str, map_location: str) -> Dict[str, int]:
+        torch_load_calls.append((path, map_location))
+        return {"weights": 1}
+
+    monkeypatch.setattr("wsi_inference.Attention_GAN.Generator", fake_generator)
+    monkeypatch.setattr("wsi_inference.torch.load", fake_torch_load)
+
+    model = load_generator("checkpoint.pt", out_channels=5, device="cpu")
+
+    assert model is fake_model
+    assert generator_calls == [
+        {
+            "n_channels": 64,
+            "in_channels": 3,
+            "batch_norm": False,
+            "out_channels": 5,
+            "padding": 1,
+            "pooling_mode": "maxpool",
+        }
+    ]
+    assert torch_load_calls == [("checkpoint.pt", "cpu")]
+    assert fake_model.loaded == [({"weights": 1}, True)]
+    assert fake_model.eval_called is True
+    assert fake_model.training is False

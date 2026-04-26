@@ -140,8 +140,13 @@ def run_tile_batch(
     device: str,
 ) -> List[np.ndarray]:
     batch = torch.stack([prepare_tile_tensor(tile) for tile in tiles], dim=0).to(device)
-    with torch.no_grad():
-        outputs = model(batch).detach().cpu().numpy().astype(np.float32)
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            outputs = model(batch).detach().cpu().numpy().astype(np.float32)
+    finally:
+        model.train(was_training)
     return [outputs[index] for index in range(outputs.shape[0])]
 
 
