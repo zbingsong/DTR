@@ -92,6 +92,35 @@ def test_stitch_tile_prediction_crops_back_to_valid_region() -> None:
     assert float(canvas[:, :4, :4].sum()) == 0.0
 
 
+def test_read_level_tile_uses_level_zero_coordinates_for_downsampled_levels() -> None:
+    from wsi_inference import read_level_tile
+
+    class FakeSlide:
+        level_downsamples = [1.0, 4.0]
+
+        def __init__(self) -> None:
+            self.read_calls = []
+
+        def read_region(
+            self,
+            location: tuple[int, int],
+            level: int,
+            size: tuple[int, int],
+        ) -> np.ndarray:
+            self.read_calls.append((location, level, size))
+            width, height = size
+            return np.full((height, width, 4), 255, dtype=np.uint8)
+
+    slide = FakeSlide()
+    tile = TileSpec(level=1, x=112, y=56, read_width=32, read_height=16)
+
+    output = read_level_tile(slide, tile, tile_size=32)
+
+    assert slide.read_calls == [((448, 224), 1, (32, 16))]
+    assert output.shape == (32, 32, 3)
+    assert output.dtype == np.uint8
+
+
 def test_quantize_global_scales_all_series_to_uint16() -> None:
     from wsi_inference import quantize_global
 
@@ -210,8 +239,11 @@ def test_run_level_inference_processes_each_level_independently() -> None:
     from wsi_inference import run_level_inference
 
     class FakeSlide:
+        level_downsamples = [1.0, 4.0]
+
         def __init__(self) -> None:
             self.level_calls = []
+            self.location_calls = []
 
         def read_region(
             self,
@@ -219,7 +251,7 @@ def test_run_level_inference_processes_each_level_independently() -> None:
             level: int,
             size: tuple[int, int],
         ) -> np.ndarray:
-            del location
+            self.location_calls.append(location)
             self.level_calls.append(level)
             width, height = size
             value = 20 if level == 0 else 40
@@ -258,6 +290,7 @@ def test_run_level_inference_processes_each_level_independently() -> None:
     assert out0.shape == (3, 4, 4)
     assert out1.shape == (3, 2, 2)
     assert slide.level_calls == [0, 1]
+    assert slide.location_calls == [(0, 0), (0, 0)]
 
 
 def test_run_level_inference_uses_bounded_mini_batches() -> None:

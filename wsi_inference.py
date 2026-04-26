@@ -116,8 +116,25 @@ def get_level_specs(slide: Any) -> List[LevelSpec]:
 
 
 def read_level_tile(slide: Any, tile: TileSpec, tile_size: int) -> np.ndarray:
+    location = (tile.x, tile.y)
+    if tile.level > 0:
+        level_downsamples = getattr(slide, "level_downsamples", None)
+        if level_downsamples is None:
+            raise ValueError("slide must expose level_downsamples for levels above 0")
+
+        try:
+            downsample = float(level_downsamples[tile.level])
+        except (IndexError, TypeError, ValueError) as exc:
+            raise ValueError(f"slide must expose a valid downsample for level {tile.level}") from exc
+
+        if not np.isfinite(downsample) or downsample <= 0.0:
+            raise ValueError(f"slide must expose a valid downsample for level {tile.level}")
+
+        # OpenSlide locations are always expressed in level-0 coordinates.
+        location = (int(round(tile.x * downsample)), int(round(tile.y * downsample)))
+
     rgba = np.asarray(
-        slide.read_region((tile.x, tile.y), tile.level, (tile.read_width, tile.read_height))
+        slide.read_region(location, tile.level, (tile.read_width, tile.read_height))
     )
     rgb = rgba[:, :, :3].astype(np.uint8)
     return pad_tile_to_size(rgb, tile_size=tile_size)
