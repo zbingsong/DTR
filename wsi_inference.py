@@ -116,11 +116,10 @@ def quantize_tile_prediction(tile_prediction: np.ndarray) -> np.ndarray:
 
 
 def write_ome_tiff(output_path: str, series_arrays: Sequence[np.ndarray]) -> None:
-    with tifffile.TiffWriter(output_path, ome=True) as tif:
+    with tifffile.TiffWriter(output_path, ome=True, bigtiff=True) as tif:
         for series in series_arrays:
             tif.write(
                 series,
                 metadata={"axes": "CYX"},
                 photometric="MINISBLACK",
-                planarconfig="SEPARATE",
             )

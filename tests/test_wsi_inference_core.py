@@ -134,5 +134,7 @@ def test_write_ome_tiff_writes_one_series_per_level(tmp_path: Path) -> None:
 
     with tifffile.TiffFile(path) as tif:
         assert len(tif.series) == 2
+        assert tif.series[0].axes == "CYX"
+        assert tif.series[1].axes == "CYX"
         assert tif.series[0].shape == (3, 4, 5)
         assert tif.series[1].shape == (3, 2, 3)
