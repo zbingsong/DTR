@@ -341,6 +341,58 @@ def test_run_level_inference_leaves_background_tiles_as_zero() -> None:
     assert float(output.sum()) == 0.0
 
 
+def test_run_level_inference_for_ome_tile_quantization_scales_per_tile() -> None:
+    import torch
+
+    from wsi_inference import run_level_inference_for_ome
+
+    class FakeSlide:
+        def read_region(
+            self,
+            location: tuple[int, int],
+            level: int,
+            size: tuple[int, int],
+        ) -> np.ndarray:
+            del level
+            width, height = size
+            rgba = np.zeros((height, width, 4), dtype=np.uint8)
+            rgba[:, :, 3] = 255
+            rgba[:, :, :3] = 10 if location[0] == 0 else 20
+            return rgba
+
+    class FakeModel(torch.nn.Module):
+        def forward(self, batch: torch.Tensor) -> torch.Tensor:
+            del batch
+            return torch.tensor(
+                [
+                    [[[1.0, 2.0], [3.0, 4.0]]],
+                    [[[10.0, 20.0], [30.0, 40.0]]],
+                ],
+                dtype=torch.float32,
+            )
+
+    level = LevelSpec(level=0, width=4, height=2, downsample=1.0)
+
+    output = run_level_inference_for_ome(
+        slide=FakeSlide(),
+        model=FakeModel(),
+        level=level,
+        tile_size=2,
+        stride=2,
+        device="cpu",
+        out_channels=1,
+        ome_quant_mode="tile",
+    )
+
+    expected_tile = np.array(
+        [[[0, 21845], [43690, 65535]]],
+        dtype=np.uint16,
+    )
+    assert output.dtype == np.uint16
+    assert np.array_equal(output[:, :, 0:2], expected_tile)
+    assert np.array_equal(output[:, :, 2:4], expected_tile)
+
+
 def test_load_generator_uses_repo_defaults_and_eval_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

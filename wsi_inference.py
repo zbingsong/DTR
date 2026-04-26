@@ -233,6 +233,63 @@ def run_level_inference(
     return canvas
 
 
+def run_level_inference_for_ome(
+    slide: Any,
+    model: torch.nn.Module,
+    level: LevelSpec,
+    tile_size: int,
+    stride: int,
+    device: str,
+    out_channels: int,
+    ome_quant_mode: str,
+    rgb_threshold: int = 200,
+    background_fraction: float = 0.995,
+) -> np.ndarray:
+    if ome_quant_mode not in {"tile", "none"}:
+        raise ValueError("run_level_inference_for_ome only handles tile or none modes")
+
+    # Canvas is CHW; `tile` stores uint16-scaled predictions, `none` preserves float32.
+    canvas_dtype = np.uint16 if ome_quant_mode == "tile" else np.float32
+    canvas = np.zeros((out_channels, level.height, level.width), dtype=canvas_dtype)
+    tiles = build_level_tiles(level=level, tile_size=tile_size, stride=stride)
+
+    batch_specs: List[TileSpec] = []
+    batch_tiles: List[np.ndarray] = []
+
+    def flush_batch() -> None:
+        if not batch_tiles:
+            return
+
+        outputs = run_tile_batch(model, batch_tiles, device=device)
+        for batch_tile, prediction in zip(batch_specs, outputs):
+            ome_prediction = (
+                quantize_tile_prediction(prediction)
+                if ome_quant_mode == "tile"
+                else prediction
+            )
+            stitch_tile_prediction(canvas, batch_tile, ome_prediction)
+        batch_specs.clear()
+        batch_tiles.clear()
+
+    for tile in tiles:
+        padded_tile = read_level_tile(slide, tile, tile_size=tile_size)
+        valid_tile = padded_tile[: tile.read_height, : tile.read_width, :]
+        if is_background_tile(
+            valid_tile,
+            rgb_threshold=rgb_threshold,
+            background_fraction=background_fraction,
+        ):
+            continue
+        batch_specs.append(tile)
+        batch_tiles.append(padded_tile)
+        if len(batch_tiles) >= LEVEL_INFERENCE_BATCH_SIZE:
+            flush_batch()
+
+    flush_batch()
+
+    return canvas
+
+
 def load_generator(
     checkpoint_path: str,
     out_channels: int,

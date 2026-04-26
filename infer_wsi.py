@@ -11,6 +11,7 @@ from wsi_inference import (
     open_slide,
     quantize_global,
     run_level_inference,
+    run_level_inference_for_ome,
     write_ome_tiff,
 )
 
@@ -85,11 +86,28 @@ def main(argv: Optional[List[str]] = None) -> int:
             raw_level_arrays.append(prediction)
             np.save(output_dir / f"{slide_stem}.level-{level_index}.npy", prediction)
 
-        ome_arrays = (
-            raw_level_arrays
-            if args.ome_quant_mode == "none"
-            else quantize_global(raw_level_arrays)
-        )
+        if args.ome_quant_mode == "global":
+            ome_arrays = quantize_global(raw_level_arrays)
+        elif args.ome_quant_mode == "tile":
+            ome_arrays = []
+            for level_index in args.levels:
+                level = level_specs[level_index]
+                ome_arrays.append(
+                    run_level_inference_for_ome(
+                        slide=slide,
+                        model=model,
+                        level=level,
+                        tile_size=args.tile_size,
+                        stride=stride,
+                        device=args.device,
+                        out_channels=args.out_channels,
+                        ome_quant_mode=args.ome_quant_mode,
+                        rgb_threshold=args.background_threshold_rgb,
+                        background_fraction=args.background_fraction,
+                    )
+                )
+        else:
+            ome_arrays = raw_level_arrays
         write_ome_tiff(output_dir / f"{slide_stem}.predictions.ome.tiff", ome_arrays)
     finally:
         wsi_inference.LEVEL_INFERENCE_BATCH_SIZE = previous_batch_size
