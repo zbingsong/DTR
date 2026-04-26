@@ -205,10 +205,21 @@ def quantize_tile_prediction(tile_prediction: np.ndarray) -> np.ndarray:
 def write_ome_tiff(output_path: str, series_arrays: Sequence[np.ndarray]) -> None:
     with tifffile.TiffWriter(output_path, ome=True, bigtiff=True) as tif:
         for series in series_arrays:
+            if series.ndim == 3 and series.shape[0] == 3:
+                # Store RGB-like HEMIT predictions as interleaved samples so
+                # ImageJ's default TIFF reader does not treat channels as slices.
+                image = np.moveaxis(series, 0, -1)
+                metadata = {"axes": "YXC"}
+                photometric = "RGB"
+            else:
+                image = series
+                metadata = {"axes": "CYX"}
+                photometric = "MINISBLACK"
+
             tif.write(
-                series,
-                metadata={"axes": "CYX"},
-                photometric="MINISBLACK",
+                image,
+                metadata=metadata,
+                photometric=photometric,
             )
 
 
