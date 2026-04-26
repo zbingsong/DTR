@@ -22,6 +22,7 @@ def test_build_parser_has_expected_defaults() -> None:
     assert args.device == "cuda:0"
     assert args.ome_quant_mode == "tile"
     assert args.checkpoint == "weights/hemit_weight.pth"
+    assert args.background_fraction == 0.999
 
 
 def test_main_rejects_missing_levels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

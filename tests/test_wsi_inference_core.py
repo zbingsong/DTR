@@ -339,7 +339,9 @@ def test_run_level_inference_uses_bounded_mini_batches() -> None:
     assert model.batch_sizes == [8, 8]
 
 
-def test_run_level_inference_leaves_background_tiles_as_zero() -> None:
+def test_run_level_inference_leaves_background_tiles_as_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import torch
 
     from wsi_inference import run_level_inference
@@ -372,6 +374,13 @@ def test_run_level_inference_leaves_background_tiles_as_zero() -> None:
     )
 
     assert float(output.sum()) == 0.0
+    log_output = capsys.readouterr().out
+    assert "Skipped background tile" in log_output
+    assert "slide_xy=(0, 0)" in log_output
+    assert "rgb_min=(255.000, 255.000, 255.000)" in log_output
+    assert "rgb_max=(255.000, 255.000, 255.000)" in log_output
+    assert "rgb_mean=(255.000, 255.000, 255.000)" in log_output
+    assert "non_white_fraction=0.000000" in log_output
 
 
 def test_run_level_inference_for_ome_tile_quantization_scales_per_tile() -> None:

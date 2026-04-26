@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from openslide import OpenSlide
 
 LEVEL_INFERENCE_BATCH_SIZE = 8
+DEFAULT_BACKGROUND_FRACTION = 0.999
 
 
 @dataclass(frozen=True)
@@ -61,10 +62,56 @@ def build_level_tiles(level: LevelSpec, tile_size: int, stride: int) -> List[Til
 def is_background_tile(
     tile_rgb: np.ndarray,
     rgb_threshold: int = 200,
-    background_fraction: float = 0.995,
+    background_fraction: float = DEFAULT_BACKGROUND_FRACTION,
 ) -> bool:
     white_mask = np.all(tile_rgb > rgb_threshold, axis=-1)
     return float(white_mask.mean()) >= background_fraction
+
+
+def _tile_level0_location(slide: Any, tile: TileSpec) -> tuple[int, int]:
+    location = (tile.x, tile.y)
+    if tile.level == 0:
+        return location
+
+    level_downsamples = getattr(slide, "level_downsamples", None)
+    if level_downsamples is None:
+        raise ValueError("slide must expose level_downsamples for levels above 0")
+
+    try:
+        downsample = float(level_downsamples[tile.level])
+    except (IndexError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"slide must expose a valid downsample for level {tile.level}"
+        ) from exc
+
+    if not np.isfinite(downsample) or downsample <= 0.0:
+        raise ValueError(f"slide must expose a valid downsample for level {tile.level}")
+
+    # OpenSlide locations are always expressed in level-0 coordinates.
+    return (int(round(tile.x * downsample)), int(round(tile.y * downsample)))
+
+
+def _log_skipped_tile(
+    tile: TileSpec,
+    slide_location: tuple[int, int],
+    tile_rgb: np.ndarray,
+    rgb_threshold: int,
+) -> None:
+    white_mask = np.all(tile_rgb > rgb_threshold, axis=-1)
+    non_white_fraction = float((~white_mask).mean())
+    channel_min = tile_rgb.min(axis=(0, 1))
+    channel_max = tile_rgb.max(axis=(0, 1))
+    channel_mean = tile_rgb.mean(axis=(0, 1))
+
+    print(
+        "Skipped background tile: "
+        f"level={tile.level} "
+        f"slide_xy=({slide_location[0]}, {slide_location[1]}) "
+        f"rgb_min=({channel_min[0]:.3f}, {channel_min[1]:.3f}, {channel_min[2]:.3f}) "
+        f"rgb_max=({channel_max[0]:.3f}, {channel_max[1]:.3f}, {channel_max[2]:.3f}) "
+        f"rgb_mean=({channel_mean[0]:.3f}, {channel_mean[1]:.3f}, {channel_mean[2]:.3f}) "
+        f"non_white_fraction={non_white_fraction:.6f}"
+    )
 
 
 def pad_tile_to_size(tile_rgb: np.ndarray, tile_size: int) -> np.ndarray:
@@ -116,23 +163,7 @@ def get_level_specs(slide: Any) -> List[LevelSpec]:
 
 
 def read_level_tile(slide: Any, tile: TileSpec, tile_size: int) -> np.ndarray:
-    location = (tile.x, tile.y)
-    if tile.level > 0:
-        level_downsamples = getattr(slide, "level_downsamples", None)
-        if level_downsamples is None:
-            raise ValueError("slide must expose level_downsamples for levels above 0")
-
-        try:
-            downsample = float(level_downsamples[tile.level])
-        except (IndexError, TypeError, ValueError) as exc:
-            raise ValueError(f"slide must expose a valid downsample for level {tile.level}") from exc
-
-        if not np.isfinite(downsample) or downsample <= 0.0:
-            raise ValueError(f"slide must expose a valid downsample for level {tile.level}")
-
-        # OpenSlide locations are always expressed in level-0 coordinates.
-        location = (int(round(tile.x * downsample)), int(round(tile.y * downsample)))
-
+    location = _tile_level0_location(slide, tile)
     rgba = np.asarray(
         slide.read_region(location, tile.level, (tile.read_width, tile.read_height))
     )
@@ -213,7 +244,8 @@ def run_level_inference(
     device: str,
     out_channels: int = 3,
     rgb_threshold: int = 200,
-    background_fraction: float = 0.995,
+    background_fraction: float = DEFAULT_BACKGROUND_FRACTION,
+    log_skipped_tiles: bool = True,
 ) -> np.ndarray:
     canvas = allocate_level_canvas(out_channels=out_channels, level=level)
     tiles = build_level_tiles(level=level, tile_size=tile_size, stride=stride)
@@ -239,6 +271,13 @@ def run_level_inference(
             rgb_threshold=rgb_threshold,
             background_fraction=background_fraction,
         ):
+            if log_skipped_tiles:
+                _log_skipped_tile(
+                    tile,
+                    _tile_level0_location(slide, tile),
+                    valid_tile,
+                    rgb_threshold,
+                )
             continue
         batch_specs.append(tile)
         batch_tiles.append(padded_tile)
@@ -260,7 +299,8 @@ def run_level_inference_for_ome(
     out_channels: int,
     ome_quant_mode: str,
     rgb_threshold: int = 200,
-    background_fraction: float = 0.995,
+    background_fraction: float = DEFAULT_BACKGROUND_FRACTION,
+    log_skipped_tiles: bool = True,
 ) -> np.ndarray:
     if ome_quant_mode not in {"tile", "none"}:
         raise ValueError("run_level_inference_for_ome only handles tile or none modes")
@@ -296,6 +336,13 @@ def run_level_inference_for_ome(
             rgb_threshold=rgb_threshold,
             background_fraction=background_fraction,
         ):
+            if log_skipped_tiles:
+                _log_skipped_tile(
+                    tile,
+                    _tile_level0_location(slide, tile),
+                    valid_tile,
+                    rgb_threshold,
+                )
             continue
         batch_specs.append(tile)
         batch_tiles.append(padded_tile)

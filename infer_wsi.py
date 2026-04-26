@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="tile",
     )
     parser.add_argument("--background-threshold-rgb", type=int, default=200)
-    parser.add_argument("--background-fraction", type=float, default=0.995)
+    parser.add_argument("--background-fraction", type=float, default=0.999)
     return parser
 
 
@@ -104,6 +104,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         ome_quant_mode=args.ome_quant_mode,
                         rgb_threshold=args.background_threshold_rgb,
                         background_fraction=args.background_fraction,
+                        log_skipped_tiles=False,
                     )
                 )
         else:
