@@ -65,6 +65,36 @@ bash train_hemit.sh
 ## Inference
 Example notebook: [play_with_the_pretrained_model.ipynb](https://github.com/birkhoffkiki/DTR/blob/main/visualize.ipynb)
 
+### WSI Inference
+The repository also supports whole-slide inference from `.svs` files.
+
+#### Additional dependencies
+Install runtime dependencies for slide reading and OME-TIFF writing:
+
+```bash
+pip install openslide-python tifffile
+```
+
+You also need the OpenSlide shared library installed on your system.
+
+#### CLI example
+```bash
+python infer_wsi.py \
+  --slide path/to/sample.svs \
+  --output-dir outputs/sample \
+  --checkpoint weights/hemit_weight.pth \
+  --levels 0 1 \
+  --tile-size 512 \
+  --device cuda:0 \
+  --ome-quant-mode tile
+```
+
+This writes:
+
+- `outputs/sample/sample.level-0.npy`
+- `outputs/sample/sample.level-1.npy`
+- `outputs/sample/sample.predictions.ome.tiff`
+
 ## contact
 
 if you have any questions, please feel free to contact me:  
