@@ -138,3 +138,38 @@ def test_write_ome_tiff_writes_one_series_per_level(tmp_path: Path) -> None:
         assert tif.series[1].axes == "CYX"
         assert tif.series[0].shape == (3, 4, 5)
         assert tif.series[1].shape == (3, 2, 3)
+
+
+def test_prepare_tile_tensor_matches_predict_py_normalization() -> None:
+    from wsi_inference import prepare_tile_tensor
+
+    tile = np.full((2, 2, 3), 255, dtype=np.uint8)
+
+    tensor = prepare_tile_tensor(tile)
+
+    assert tuple(tensor.shape) == (3, 2, 2)
+    assert float(tensor.max()) == 1.0
+    assert float(tensor.min()) == 1.0
+
+
+def test_run_tile_batch_returns_same_spatial_shape() -> None:
+    import torch
+
+    from wsi_inference import run_tile_batch
+
+    class FakeModel(torch.nn.Module):
+        def forward(self, batch: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(
+                (batch.shape[0], 3, batch.shape[2], batch.shape[3]),
+                dtype=batch.dtype,
+            )
+
+    tiles = [
+        np.zeros((4, 4, 3), dtype=np.uint8),
+        np.zeros((4, 4, 3), dtype=np.uint8),
+    ]
+
+    outputs = run_tile_batch(FakeModel(), tiles, device="cpu")
+
+    assert len(outputs) == 2
+    assert outputs[0].shape == (3, 4, 4)

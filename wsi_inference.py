@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from typing import List, Sequence
 
+import Attention_GAN
 import numpy as np
 import tifffile
+import torch
 
 
 @dataclass(frozen=True)
@@ -123,3 +125,40 @@ def write_ome_tiff(output_path: str, series_arrays: Sequence[np.ndarray]) -> Non
                 metadata={"axes": "CYX"},
                 photometric="MINISBLACK",
             )
+
+
+def prepare_tile_tensor(tile_rgb: np.ndarray) -> torch.Tensor:
+    # Input tiles are HWC uint8 RGB; the model expects CHW float32 in [-1, 1].
+    tensor = torch.from_numpy(tile_rgb.transpose(2, 0, 1)).to(dtype=torch.float32)
+    tensor = tensor / 255.0
+    return (tensor - 0.5) * 2.0
+
+
+def run_tile_batch(
+    model: torch.nn.Module,
+    tiles: List[np.ndarray],
+    device: str,
+) -> List[np.ndarray]:
+    batch = torch.stack([prepare_tile_tensor(tile) for tile in tiles], dim=0).to(device)
+    with torch.no_grad():
+        outputs = model(batch).detach().cpu().numpy().astype(np.float32)
+    return [outputs[index] for index in range(outputs.shape[0])]
+
+
+def load_generator(
+    checkpoint_path: str,
+    out_channels: int,
+    device: str,
+) -> torch.nn.Module:
+    model = Attention_GAN.Generator(
+        n_channels=64,
+        in_channels=3,
+        batch_norm=False,
+        out_channels=out_channels,
+        padding=1,
+        pooling_mode="maxpool",
+    ).to(device)
+    state_dict = torch.load(checkpoint_path, map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)
+    model.eval()
+    return model
