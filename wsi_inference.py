@@ -323,13 +323,13 @@ def run_level_inference(
             rgb_threshold=rgb_threshold,
             background_fraction=background_fraction,
         ):
-            if log_skipped_tiles:
-                _log_skipped_tile(
-                    tile,
-                    _tile_level0_location(slide, tile),
-                    valid_tile,
-                    rgb_threshold,
-                )
+            # if log_skipped_tiles:
+            #     _log_skipped_tile(
+            #         tile,
+            #         _tile_level0_location(slide, tile),
+            #         valid_tile,
+            #         rgb_threshold,
+            #     )
             continue
         batch_specs.append(tile)
         batch_tiles.append(padded_tile)
@@ -390,13 +390,13 @@ def run_level_inference_for_ome(
             rgb_threshold=rgb_threshold,
             background_fraction=background_fraction,
         ):
-            if log_skipped_tiles:
-                _log_skipped_tile(
-                    tile,
-                    _tile_level0_location(slide, tile),
-                    valid_tile,
-                    rgb_threshold,
-                )
+            # if log_skipped_tiles:
+            #     _log_skipped_tile(
+            #         tile,
+            #         _tile_level0_location(slide, tile),
+            #         valid_tile,
+            #         rgb_threshold,
+            #     )
             continue
         batch_specs.append(tile)
         batch_tiles.append(padded_tile)
