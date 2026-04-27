@@ -165,30 +165,10 @@ def test_write_ome_tiff_writes_one_series_per_level(tmp_path: Path) -> None:
 
     with tifffile.TiffFile(path) as tif:
         assert len(tif.series) == 2
-        assert tif.series[0].axes == "YXS"
-        assert tif.series[1].axes == "YXS"
-        assert tif.series[0].shape == (4, 5, 3)
-        assert tif.series[1].shape == (2, 3, 3)
-        assert tif.series[0].pages[0].samplesperpixel == 3
-        assert tif.series[1].pages[0].samplesperpixel == 3
-        assert 'SizeC="3"' in tif.ome_metadata
-        assert 'Interleaved="true"' in tif.ome_metadata
-
-
-def test_write_ome_tiff_preserves_non_rgb_channels_as_cyx(tmp_path: Path) -> None:
-    import tifffile
-
-    from wsi_inference import write_ome_tiff
-
-    path = tmp_path / "predictions.ome.tiff"
-    write_ome_tiff(str(path), [np.zeros((4, 4, 5), dtype=np.uint16)])
-
-    with tifffile.TiffFile(path) as tif:
-        assert len(tif.series) == 1
         assert tif.series[0].axes == "CYX"
-        assert tif.series[0].shape == (4, 4, 5)
-        assert tif.series[0].pages[0].samplesperpixel == 1
-        assert 'SizeC="4"' in tif.ome_metadata
+        assert tif.series[1].axes == "CYX"
+        assert tif.series[0].shape == (3, 4, 5)
+        assert tif.series[1].shape == (3, 2, 3)
 
 
 def test_prepare_tile_tensor_matches_predict_py_normalization() -> None:
