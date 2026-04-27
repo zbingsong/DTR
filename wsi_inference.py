@@ -134,8 +134,16 @@ def stitch_tile_prediction(
     ] = valid_prediction
 
 
-def allocate_level_canvas(out_channels: int, level: LevelSpec) -> np.ndarray:
-    return np.zeros((out_channels, level.height, level.width), dtype=np.float32)
+def allocate_level_canvas(
+    out_channels: int,
+    level: LevelSpec,
+    fill_value: float = np.nan,
+) -> np.ndarray:
+    return np.full(
+        (out_channels, level.height, level.width),
+        fill_value,
+        dtype=np.float32,
+    )
 
 
 def open_slide(slide_path: str) -> "OpenSlide":
@@ -184,14 +192,58 @@ def _scale_to_uint16(
     return np.round(scaled * 65535.0).astype(np.uint16)
 
 
+def _global_finite_min(level_arrays: Sequence[np.ndarray]) -> float:
+    finite_mins: List[float] = []
+    for array in level_arrays:
+        if np.isinf(array).any():
+            raise ValueError("predictions must not contain infinite values")
+
+        finite_mask = np.isfinite(array)
+        if finite_mask.any():
+            finite_mins.append(float(array[finite_mask].min()))
+
+    if not finite_mins:
+        return 0.0
+    return min(finite_mins)
+
+
+def fill_nan_with_global_min(level_arrays: Sequence[np.ndarray]) -> List[np.ndarray]:
+    global_min = _global_finite_min(level_arrays)
+    return [
+        np.nan_to_num(array, nan=global_min).astype(array.dtype, copy=False)
+        for array in level_arrays
+    ]
+
+
 def quantize_global(level_arrays: Sequence[np.ndarray]) -> List[np.ndarray]:
     non_empty = [array for array in level_arrays if array.size > 0]
     if not non_empty:
         raise ValueError("global quantization requires at least one array")
 
-    global_min = min(float(array.min()) for array in non_empty)
-    global_max = max(float(array.max()) for array in non_empty)
-    return [_scale_to_uint16(array, global_min, global_max) for array in level_arrays]
+    if any(np.isinf(array).any() for array in non_empty):
+        raise ValueError("predictions must not contain infinite values")
+
+    finite_arrays = [array[np.isfinite(array)] for array in non_empty]
+    finite_arrays = [array for array in finite_arrays if array.size > 0]
+    if not finite_arrays:
+        return [np.zeros_like(array, dtype=np.uint16) for array in level_arrays]
+
+    global_min = min(float(array.min()) for array in finite_arrays)
+    global_max = max(float(array.max()) for array in finite_arrays)
+    filled_arrays = [np.nan_to_num(array, nan=global_min) for array in level_arrays]
+    return [_scale_to_uint16(array, global_min, global_max) for array in filled_arrays]
+
+
+def _fill_nan_with_min(array: np.ndarray) -> np.ndarray:
+    if np.isinf(array).any():
+        raise ValueError("predictions must not contain infinite values")
+
+    finite_mask = np.isfinite(array)
+    if not finite_mask.any():
+        return np.zeros_like(array, dtype=np.float32)
+
+    min_value = float(array[finite_mask].min())
+    return np.nan_to_num(array, nan=min_value).astype(np.float32, copy=False)
 
 
 def quantize_tile_prediction(tile_prediction: np.ndarray) -> np.ndarray:
@@ -305,9 +357,11 @@ def run_level_inference_for_ome(
     if ome_quant_mode not in {"tile", "none"}:
         raise ValueError("run_level_inference_for_ome only handles tile or none modes")
 
-    # Canvas is CHW; `tile` stores uint16-scaled predictions, `none` preserves float32.
-    canvas_dtype = np.uint16 if ome_quant_mode == "tile" else np.float32
-    canvas = np.zeros((out_channels, level.height, level.width), dtype=canvas_dtype)
+    # Canvas is CHW; skipped tile mode regions remain black, raw float regions stay NaN until resolved.
+    if ome_quant_mode == "tile":
+        canvas = np.zeros((out_channels, level.height, level.width), dtype=np.uint16)
+    else:
+        canvas = allocate_level_canvas(out_channels=out_channels, level=level)
     tiles = build_level_tiles(level=level, tile_size=tile_size, stride=stride)
 
     batch_specs: List[TileSpec] = []
@@ -350,6 +404,9 @@ def run_level_inference_for_ome(
             flush_batch()
 
     flush_batch()
+
+    if ome_quant_mode == "none":
+        return _fill_nan_with_min(canvas)
 
     return canvas
 

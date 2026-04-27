@@ -6,6 +6,7 @@ import numpy as np
 
 import wsi_inference
 from wsi_inference import (
+    fill_nan_with_global_min,
     get_level_specs,
     load_generator,
     open_slide,
@@ -108,7 +109,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     )
                 )
         else:
-            ome_arrays = raw_level_arrays
+            ome_arrays = fill_nan_with_global_min(raw_level_arrays)
         write_ome_tiff(output_dir / f"{slide_stem}.predictions.ome.tiff", ome_arrays)
     finally:
         wsi_inference.LEVEL_INFERENCE_BATCH_SIZE = previous_batch_size

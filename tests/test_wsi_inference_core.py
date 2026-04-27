@@ -137,6 +137,38 @@ def test_quantize_global_scales_all_series_to_uint16() -> None:
     assert scaled[1][0, 0, 1] == 65535
 
 
+def test_quantize_global_maps_nan_background_to_global_minimum() -> None:
+    from wsi_inference import quantize_global
+
+    arrays = [
+        np.array([[[np.nan, 2.0]]], dtype=np.float32),
+        np.array([[[4.0, np.nan]]], dtype=np.float32),
+    ]
+
+    scaled = quantize_global(arrays)
+
+    assert scaled[0].dtype == np.uint16
+    assert scaled[0][0, 0, 0] == 0
+    assert scaled[0][0, 0, 1] == 0
+    assert scaled[1][0, 0, 0] == 65535
+    assert scaled[1][0, 0, 1] == 0
+
+
+def test_fill_nan_with_global_min_replaces_nan_background() -> None:
+    from wsi_inference import fill_nan_with_global_min
+
+    arrays = [
+        np.array([[[np.nan, 2.0]]], dtype=np.float32),
+        np.array([[[4.0, np.nan]]], dtype=np.float32),
+    ]
+
+    filled = fill_nan_with_global_min(arrays)
+
+    assert filled[0].dtype == np.float32
+    assert np.array_equal(filled[0], np.array([[[2.0, 2.0]]], dtype=np.float32))
+    assert np.array_equal(filled[1], np.array([[[4.0, 2.0]]], dtype=np.float32))
+
+
 def test_quantize_tile_scales_each_tile_before_stitching() -> None:
     from wsi_inference import quantize_tile_prediction
 
@@ -339,7 +371,7 @@ def test_run_level_inference_uses_bounded_mini_batches() -> None:
     assert model.batch_sizes == [8, 8]
 
 
-def test_run_level_inference_leaves_background_tiles_as_zero(
+def test_run_level_inference_leaves_background_tiles_as_nan(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import torch
@@ -373,7 +405,7 @@ def test_run_level_inference_leaves_background_tiles_as_zero(
         device="cpu",
     )
 
-    assert float(output.sum()) == 0.0
+    assert np.isnan(output).all()
     log_output = capsys.readouterr().out
     assert "Skipped background tile" in log_output
     assert "slide_xy=(0, 0)" in log_output
@@ -381,6 +413,45 @@ def test_run_level_inference_leaves_background_tiles_as_zero(
     assert "rgb_max=(255.000, 255.000, 255.000)" in log_output
     assert "rgb_mean=(255.000, 255.000, 255.000)" in log_output
     assert "non_white_fraction=0.000000" in log_output
+
+
+def test_run_level_inference_for_ome_tile_keeps_background_black() -> None:
+    import torch
+
+    from wsi_inference import run_level_inference_for_ome
+
+    class FakeSlide:
+        def read_region(
+            self,
+            location: tuple[int, int],
+            level: int,
+            size: tuple[int, int],
+        ) -> np.ndarray:
+            del location, level
+            width, height = size
+            return np.full((height, width, 4), 255, dtype=np.uint8)
+
+    class FakeModel(torch.nn.Module):
+        def forward(self, batch: torch.Tensor) -> torch.Tensor:
+            del batch
+            raise AssertionError("background tiles should not be inferred")
+
+    level = LevelSpec(level=0, width=4, height=4, downsample=1.0)
+
+    output = run_level_inference_for_ome(
+        FakeSlide(),
+        FakeModel(),
+        level,
+        tile_size=4,
+        stride=4,
+        device="cpu",
+        out_channels=3,
+        ome_quant_mode="tile",
+        log_skipped_tiles=False,
+    )
+
+    assert output.dtype == np.uint16
+    assert int(output.sum()) == 0
 
 
 def test_run_level_inference_for_ome_tile_quantization_scales_per_tile() -> None:

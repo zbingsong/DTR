@@ -132,11 +132,13 @@ def _configure_main_mode_test(monkeypatch: pytest.MonkeyPatch) -> dict:
     def fake_run_level_inference(**kwargs: object) -> np.ndarray:
         level = kwargs["level"]
         calls["run_level_inference"].append(level.level)
-        return np.full(
+        array = np.full(
             (3, level.height, level.width),
             fill_value=level.level + 1.5,
             dtype=np.float32,
         )
+        array[0, 0, 0] = np.nan
+        return array
 
     def fake_quantize_global(arrays: list[np.ndarray]) -> list[np.ndarray]:
         calls["quantize_global"].append([array.copy() for array in arrays])
@@ -201,7 +203,8 @@ def test_main_global_mode_uses_global_quantization(
     assert int(calls["ome_arrays"][1][0][0, 0, 0]) == 101
     assert int(calls["ome_arrays"][1][1][0, 0, 0]) == 202
     assert calls["saved_npy"][0][1].dtype == np.float32
-    assert float(calls["saved_npy"][0][1][0, 0, 0]) == 1.5
+    assert np.isnan(calls["saved_npy"][0][1][0, 0, 0])
+    assert float(calls["saved_npy"][0][1][0, 0, 1]) == 1.5
 
 
 def test_main_tile_mode_uses_tile_quantized_ome_arrays(
@@ -232,7 +235,8 @@ def test_main_tile_mode_uses_tile_quantized_ome_arrays(
     assert int(calls["ome_arrays"][1][0][0, 0, 0]) == 11
     assert int(calls["ome_arrays"][1][1][0, 0, 0]) == 22
     assert calls["saved_npy"][1][1].dtype == np.float32
-    assert float(calls["saved_npy"][1][1][0, 0, 0]) == 2.5
+    assert np.isnan(calls["saved_npy"][1][1][0, 0, 0])
+    assert float(calls["saved_npy"][1][1][0, 0, 1]) == 2.5
 
 
 def test_main_none_mode_writes_raw_float_ome_arrays(
@@ -261,4 +265,6 @@ def test_main_none_mode_writes_raw_float_ome_arrays(
     assert calls["quantize_global"] == []
     assert calls["ome_arrays"][1][0].dtype == np.float32
     assert float(calls["ome_arrays"][1][0][0, 0, 0]) == 1.5
-    assert float(calls["ome_arrays"][1][1][0, 0, 0]) == 2.5
+    assert float(calls["ome_arrays"][1][1][0, 0, 0]) == 1.5
+    assert float(calls["ome_arrays"][1][1][0, 0, 1]) == 2.5
+    assert np.isnan(calls["saved_npy"][0][1][0, 0, 0])
